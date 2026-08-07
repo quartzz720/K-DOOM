@@ -1,0 +1,38 @@
+# Game data. NEVER commit these.
+#
+# The DOOM *source* is GPL-2.0 and is what this repository is. The WAD files
+# are not: they are the commercial game, still sold, and being widely
+# available is not the same as being free to redistribute. A port ships
+# without one and tells you to bring your own - which is what every other DOOM
+# port has done for twenty-five years.
+#
+# Keep the WAD next to the built binary, on the disk image, on the USB stick.
+# Not here.
+*.WAD
+*.wad
+*.LMP
+*.lmp
+*.DEH
+*.deh
+
+# The original DOS executables and their support files, if they ever get
+# copied into this tree by accident. Same reason.
+DOOM.EXE
+DOOM*.EXE
+DM.EXE
+*.CFG
+
+# Build output
+*.EXE
+*.o
+*.a
+build/
+
+# Saved games and configuration the game writes next to itself
+doomsav*.dsg
+default.cfg
+
+# Editor and OS leftovers
+*.swp
+*~
+.DS_Store

@@ -71,17 +71,20 @@ FixedDiv2
 ( fixed_t	a,
   fixed_t	b )
 {
-#if 0
+    // Koi-DOS: the integer path, which id wrote here and left switched off.
+    //
+    // This is the only floating point left anywhere in DOOM's portable code -
+    // everything else sits inside #if 0 or an UNUSED branch, abandoned when
+    // the tables moved into tables.c. Programs here are compiled
+    // -mgeneral-regs-only, because nothing configures SSE state after
+    // ExitBootServices, so the double version cannot be built at all.
+    //
+    // The two are not merely equivalent, this one is better: 64-bit integer
+    // division is exact where a double loses the low bits of a large fixed_t.
     long long c;
-    c = ((long long)a<<16) / ((long long)b);
-    return (fixed_t) c;
-#endif
 
-    double c;
-
-    c = ((double)a) / ((double)b) * FRACUNIT;
-
-    if (c >= 2147483648.0 || c < -2147483648.0)
+    if (!b)
 	I_Error("FixedDiv: divide by zero");
+    c = ((long long)a<<16) / ((long long)b);
     return (fixed_t) c;
 }

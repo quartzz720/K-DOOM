@@ -573,45 +573,25 @@ void IdentifyVersion (void)
     char*	tntwad;
 
 #ifdef NORMALUNIX
-    char *home;
-    char *doomwaddir;
-    doomwaddir = getenv("DOOMWADDIR");
-    if (!doomwaddir)
-	doomwaddir = ".";
+    // Koi-DOS: plain names in the current directory.
+    //
+    // There is no environment to read DOOMWADDIR or HOME out of, and no
+    // reason to want one: a package keeps its data next to itself, and a
+    // relative path resolves from wherever the shell is standing. So `cd
+    // \DOOM` and the WAD beside the program is found.
+    //
+    // The separator is the other reason this block had to change. DOOM builds
+    // "%s/doom.wad", and a forward slash is not a path separator here - it
+    // introduces a switch, as it did in DOS.
+    doom2wad = "doom2.wad";
+    doomuwad = "doomu.wad";
+    doomwad = "doom.wad";
+    doom1wad = "doom1.wad";
+    plutoniawad = "plutonia.wad";
+    tntwad = "tnt.wad";
+    doom2fwad = "doom2f.wad";
 
-    // Commercial.
-    doom2wad = malloc(strlen(doomwaddir)+1+9+1);
-    sprintf(doom2wad, "%s/doom2.wad", doomwaddir);
-
-    // Retail.
-    doomuwad = malloc(strlen(doomwaddir)+1+8+1);
-    sprintf(doomuwad, "%s/doomu.wad", doomwaddir);
-    
-    // Registered.
-    doomwad = malloc(strlen(doomwaddir)+1+8+1);
-    sprintf(doomwad, "%s/doom.wad", doomwaddir);
-    
-    // Shareware.
-    doom1wad = malloc(strlen(doomwaddir)+1+9+1);
-    sprintf(doom1wad, "%s/doom1.wad", doomwaddir);
-
-     // Bug, dear Shawn.
-    // Insufficient malloc, caused spurious realloc errors.
-    plutoniawad = malloc(strlen(doomwaddir)+1+/*9*/12+1);
-    sprintf(plutoniawad, "%s/plutonia.wad", doomwaddir);
-
-    tntwad = malloc(strlen(doomwaddir)+1+9+1);
-    sprintf(tntwad, "%s/tnt.wad", doomwaddir);
-
-
-    // French stuff.
-    doom2fwad = malloc(strlen(doomwaddir)+1+10+1);
-    sprintf(doom2fwad, "%s/doom2f.wad", doomwaddir);
-
-    home = getenv("HOME");
-    if (!home)
-      I_Error("Please set $HOME to your home directory");
-    sprintf(basedefault, "%s/.doomrc", home);
+    strcpy (basedefault, "default.cfg");
 #endif
 
     if (M_CheckParm ("-shdev"))

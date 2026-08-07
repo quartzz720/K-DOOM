@@ -81,7 +81,11 @@ typedef enum
 //  and unfinished. Default is synchronous.
 // Experimental asynchronous timer based is
 //  handled by SNDINTR. 
-#define SNDSERV  1
+// Koi-DOS: there is no sound server, and this define did more than name one.
+// It also put mb_used into the configuration table with a default of 2, which
+// silently halved the zone before Z_Init ever ran - the DOS build used six and
+// the registered WAD needs it.
+// #define SNDSERV  1
 //#define SNDINTR  1
 
 

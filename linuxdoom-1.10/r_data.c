@@ -73,7 +73,7 @@ typedef struct
     short	patch;
     short	stepdir;
     short	colormap;
-} mappatch_t;
+} __attribute__((packed)) mappatch_t;
 
 
 //
@@ -81,16 +81,29 @@ typedef struct
 // A DOOM wall texture is a list of patches
 // which are to be combined in a predefined order.
 //
+// Koi-DOS: this is read straight out of the WAD, so it has to match the file
+// rather than whatever the compiler finds convenient.
+//
+// columndirectory was a pointer, and the WAD was written by a 32-bit program,
+// so the file has four bytes there. Declared as a pointer it takes eight on a
+// 64-bit machine - and eight-byte alignment moves it as well - which pushed
+// patchcount and every patch after it off by four bytes. patchcount then read
+// as garbage, and the loop that fills in the patches ran far past what was
+// allocated for it, into the next zone block's header.
+//
+// That is the second half of the same crash: the first half was allocating
+// pointer arrays four bytes an element. Both put a texture name where a
+// pointer belonged, which is why both looked identical from the panic screen.
 typedef struct
 {
     char		name[8];
-    boolean		masked;	
+    int			masked;
     short		width;
     short		height;
-    void		**columndirectory;	// OBSOLETE
+    int			columndirectory;	// OBSOLETE, and 32 bits on disk
     short		patchcount;
     mappatch_t	patches[1];
-} maptexture_t;
+} __attribute__((packed)) maptexture_t;
 
 
 // A single patch from a texture definition,
@@ -479,13 +492,24 @@ void R_InitTextures (void)
     }
     numtextures = numtextures1 + numtextures2;
 	
-    textures = Z_Malloc (numtextures*4, PU_STATIC, 0);
-    texturecolumnlump = Z_Malloc (numtextures*4, PU_STATIC, 0);
-    texturecolumnofs = Z_Malloc (numtextures*4, PU_STATIC, 0);
-    texturecomposite = Z_Malloc (numtextures*4, PU_STATIC, 0);
-    texturecompositesize = Z_Malloc (numtextures*4, PU_STATIC, 0);
-    texturewidthmask = Z_Malloc (numtextures*4, PU_STATIC, 0);
-    textureheight = Z_Malloc (numtextures*4, PU_STATIC, 0);
+    // Koi-DOS: sizeof, not 4.
+    //
+    // Four of these arrays hold pointers, and this code was written when a
+    // pointer was four bytes. On a 64-bit machine each allocation came out
+    // exactly half the size it needed, and filling one ran off the end into
+    // the next zone block's header - which is how a texture name ends up
+    // where a pointer belongs. The crash that caused was inside Z_Malloc,
+    // nowhere near here, and the register that gave it away held "BIGDOOR7".
+    //
+    // The ones holding ints did not need changing. They are changed anyway:
+    // a size written as sizeof(*x) cannot be wrong later.
+    textures = Z_Malloc (numtextures*sizeof(*textures), PU_STATIC, 0);
+    texturecolumnlump = Z_Malloc (numtextures*sizeof(*texturecolumnlump), PU_STATIC, 0);
+    texturecolumnofs = Z_Malloc (numtextures*sizeof(*texturecolumnofs), PU_STATIC, 0);
+    texturecomposite = Z_Malloc (numtextures*sizeof(*texturecomposite), PU_STATIC, 0);
+    texturecompositesize = Z_Malloc (numtextures*sizeof(*texturecompositesize), PU_STATIC, 0);
+    texturewidthmask = Z_Malloc (numtextures*sizeof(*texturewidthmask), PU_STATIC, 0);
+    textureheight = Z_Malloc (numtextures*sizeof(*textureheight), PU_STATIC, 0);
 
     totalwidth = 0;
     
@@ -567,7 +591,7 @@ void R_InitTextures (void)
 	R_GenerateLookup (i);
     
     // Create translation table for global animation.
-    texturetranslation = Z_Malloc ((numtextures+1)*4, PU_STATIC, 0);
+    texturetranslation = Z_Malloc ((numtextures+1)*sizeof(*texturetranslation), PU_STATIC, 0);
     
     for (i=0 ; i<numtextures ; i++)
 	texturetranslation[i] = i;
@@ -587,7 +611,7 @@ void R_InitFlats (void)
     numflats = lastflat - firstflat + 1;
 	
     // Create translation table for global animation.
-    flattranslation = Z_Malloc ((numflats+1)*4, PU_STATIC, 0);
+    flattranslation = Z_Malloc ((numflats+1)*sizeof(*flattranslation), PU_STATIC, 0);
     
     for (i=0 ; i<numflats ; i++)
 	flattranslation[i] = i;
@@ -609,9 +633,9 @@ void R_InitSpriteLumps (void)
     lastspritelump = W_GetNumForName ("S_END") - 1;
     
     numspritelumps = lastspritelump - firstspritelump + 1;
-    spritewidth = Z_Malloc (numspritelumps*4, PU_STATIC, 0);
-    spriteoffset = Z_Malloc (numspritelumps*4, PU_STATIC, 0);
-    spritetopoffset = Z_Malloc (numspritelumps*4, PU_STATIC, 0);
+    spritewidth = Z_Malloc (numspritelumps*sizeof(*spritewidth), PU_STATIC, 0);
+    spriteoffset = Z_Malloc (numspritelumps*sizeof(*spriteoffset), PU_STATIC, 0);
+    spritetopoffset = Z_Malloc (numspritelumps*sizeof(*spritetopoffset), PU_STATIC, 0);
 	
     for (i=0 ; i< numspritelumps ; i++)
     {
