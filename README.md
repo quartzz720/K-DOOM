@@ -51,7 +51,7 @@ of C library the game expects and Koi-DOS does not have.
 |---|---|
 | `i_video.c` | the screen and the keyboard |
 | `i_system.c` | time, the zone, and stopping |
-| `i_sound.c` | stubs — there is no audio device yet |
+| `i_sound.c` | sound effects, through the Koi-DOS mixer |
 | `i_net.c` | one player, and an honest refusal for `-net` |
 | `k_stdio.c` | `stdio`, `unistd` and the odd corners of `stdlib` |
 | `include/` | the standard headers, thin enough to read in one sitting |
@@ -62,6 +62,32 @@ and a scale in one pass over the destination. The scale is a whole number —
 1280×800 gives exactly 4× — because a non-integer scale has to interpolate, and
 interpolating means three reads per pixel with no floating point to do it in.
 Only the picture is sent to the display, never the whole screen.
+
+**Sound.** Koi-DOS mixes, so this file only decides what to hand it: where a
+sound lives in the WAD, what its bytes mean, and how DOOM's volume, stereo
+separation and pitch map onto the mixer's. There is no ring buffer here, no
+resampling and no callback — that is all in the kernel, where every program
+gets it. The original had to do the mixing itself into a buffer it wrote to
+`/dev/dsp`, which is where its eight-channel limit came from.
+
+A sound effect is a DMX lump: eight bytes of header and then unsigned 8-bit
+samples, which the mixer takes as they are. The rate is read from each lump
+rather than assumed — almost all of them are 11025 Hz, but two in the
+registered WAD are 22050, and assuming would play those two at half speed.
+
+The pitch table is kept. DOOM varies the pitch of nearly every sound by a
+random amount — the chainsaw most obviously, but also every shot and every
+grunt — and without it a firefight is the same four samples over and over. The
+original built it with `pow(2, (pitch-128)/64)` at start-up; there is no
+floating point here, so it is a table of 16.16 multipliers.
+
+Nothing is preloaded. The original read all 122 sounds up front, 1.2 MB into a
+6 MB zone before the first level, because it needed them in its own mixing
+format. A lump is now cached the first time the game asks for it.
+
+**Music is still silent**, and not for want of a device. DOOM's music is MUS, a
+MIDI-like event stream written for an OPL2 chip, so playing it needs a
+synthesiser rather than a mixer.
 
 **No floating point at all.** Programs are compiled `-mgeneral-regs-only`,
 because nothing configures SSE state after `ExitBootServices`. That turned out
@@ -93,6 +119,15 @@ test written out twice.
 **`d_main.c`** — no environment to read `$HOME` or `$DOOMWADDIR` from, and a
 forward slash is not a path separator on Koi-DOS. Plain names in the current
 directory.
+
+**Not changed, but compensated for:** this release has the multiplication that
+turns the volume slider into a volume commented out — in `d_main.c` inside the
+call to `S_Init`, and again in `m_menu.c`. The menu is 0 to 15 and everything
+below the mixer expects 0 to 127, so the game plays eight times quieter than
+it should: measured, the pistol came out at 3.5% of full scale instead of 28%.
+The scale is restored in `i_sound.c` rather than in id's tree, because
+`snd_SfxVolume` is also what the options screen draws its thermometer from —
+multiply it there and the slider reads 120 out of 16.
 
 **`doomdef.h`** — `SNDSERV` off. It named a sound server that does not exist,
 and it also put `mb_used` into the configuration table with a default of 2,
