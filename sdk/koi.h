@@ -133,8 +133,37 @@ static inline long koi_readline(char* buffer, long size) {
     return koi_call(SYS_READLINE, (long)buffer, size, 0);
 }
 
+/* The environment, as the shell has it. Returns the length, or 0 when there is
+ * no such variable - so `koi_getenv("PATH", ...)` both fetches it and answers
+ * whether it is set.
+ *
+ * Read-only, deliberately: there is one environment because there is one
+ * program running at a time, and a program that wrote it would be changing the
+ * shell's for good. */
+static inline long koi_getenv(const char* name, char* buffer, long size) {
+    return koi_call(SYS_GETENV, (long)name, (long)buffer, size);
+}
+
+/* The name of the index-th variable, for listing them. Returns 0 when there
+   are no more. */
+static inline long koi_env_at(long index, char* name, long size) {
+    return koi_call(SYS_ENVAT, index, (long)name, size);
+}
+
 static inline void koi_cls(void) {
     koi_call(SYS_CLS, 0, 0, 0);
+}
+
+/* Put the cursor somewhere, in columns and rows. The screen's size is
+   KOI_INFO_TEXT_COLUMNS and KOI_INFO_TEXT_ROWS. What separates a program that
+   prints from a program that has a screen. */
+static inline void koi_gotoxy(int column, int row) {
+    (void)koi_call(SYS_GOTOXY, KOI_POINT(column, row), 0, 0);
+}
+
+/* Hide the cursor while redrawing, so it does not race across the screen. */
+static inline void koi_cursor(int visible) {
+    (void)koi_call(SYS_CURSOR, visible, 0, 0);
 }
 
 static inline void koi_color(int foreground, int background) {
@@ -195,6 +224,16 @@ static inline long koi_mkdir(const char* path) {
     return koi_call(SYS_MKDIR, (long)path, 0, 0);
 }
 
+/* Change which drive this program's paths mean.
+ *
+ * Affects this program only - the shell stays where it was, so exiting cannot
+ * move the user's feet. The working directory returns to the root, because the
+ * one it was in belonged to a different drive. Returns 1, or -1 when there is
+ * no such drive. */
+static inline int koi_setdrive(int letter) {
+    return (int)koi_call(SYS_SETDRIVE, (long)letter, 0, 0);
+}
+
 static inline int koi_exists(const char* path) {
     return (int)koi_call(SYS_EXISTS, (long)path, 0, 0);
 }
@@ -248,6 +287,42 @@ static inline long koi_sysinfo(long item, long index) {
 
 static inline long koi_systext(long item, long index, char* buffer, long size) {
     return koi_call4(SYS_SYSTEXT, item, index, (long)buffer, size);
+}
+
+/* Where this program's own files are.
+ *
+ * A package installs into a directory of its own and keeps its data there:
+ * DOOM and its WAD, Mizu and its wallpaper. The current directory is the
+ * user's - it is wherever they were standing when they typed the name - and
+ * once a package is on the search path, that is somewhere else entirely. A
+ * program that opens "DOOM.WAD" and expects to find its own copy is asking the
+ * wrong directory, and one that opens "\\MIZU\\WALLPAPER.BMP" has guessed
+ * where it was installed, which is the same mistake spelled confidently.
+ *
+ * So: ask. The kernel knows the path it loaded, and everything beside the
+ * program is one join away from it.
+ *
+ * `koi_beside` writes the full path to a file that ships with the program.
+ * Returns its length, or 0 when it will not fit. A program loaded from the
+ * root gets the name back unchanged, which is correct there. */
+static inline long koi_beside(const char* name, char* buffer, long size) {
+    long cut = 0;
+    long length = 0;
+
+    if (!name || !buffer || size <= 0) return 0;
+    if (koi_systext(KOI_TEXT_PROGRAM_PATH, 0, buffer, size) <= 0) buffer[0] = 0;
+
+    /* Everything up to and including the last backslash is the directory. */
+    for (long index = 0; buffer[index]; index++)
+        if (buffer[index] == '\\') cut = index + 1;
+    length = cut;
+
+    for (long index = 0; name[index]; index++) {
+        if (length + 1 >= size) { buffer[0] = 0; return 0; }
+        buffer[length++] = name[index];
+    }
+    buffer[length] = 0;
+    return length;
 }
 
 /* ---- Graphics ------------------------------------------------------------
@@ -329,6 +404,135 @@ static inline void koi_gfx_text(int x, int y, const char* text,
                     background);
 }
 
+/* The same, with KOI_TEXT_BOLD, KOI_TEXT_ITALIC and KOI_TEXT_UNDERLINE - made
+   from the glyphs the font already carries, so they cost no font data and go
+   on working when a different font is fitted. */
+static inline void koi_gfx_text_styled(int x, int y, const char* text,
+                                       koi_uint32 color, long background,
+                                       int style) {
+    (void)koi_call4(SYS_GFX_TEXT_STYLED, KOI_POINT(x, y), (long)text,
+                    (long)color,
+                    (background & 0xFFFFFFFFL) |
+                    ((long)(style & 0xFF) << 32));
+}
+
+static inline void koi_gfx_scissor(int x, int y, int width, int height) {
+    (void)koi_call(SYS_GFX_SCISSOR, KOI_POINT(x, y), KOI_POINT(width, height), 0);
+}
+
+static inline void koi_gfx_reset_scissor(void) {
+    (void)koi_call(SYS_GFX_SCISSOR_RESET, 0, 0, 0);
+}
+
+/* Run a command and come back when it has finished.
+ *
+ * This program stays in memory with everything it has; the one it starts gets
+ * a slot of its own, and this returns when that program exits. `koi_chain` is
+ * the other half of the pair and means the opposite: give up this program's
+ * memory first. Use chain when the thing being started needs the room; use
+ * this when you want to come back where you were.
+ *
+ * The screen belongs to whoever took it. A program drawing on the framebuffer
+ * should koi_gfx_leave() before this and koi_gfx_enter() afterwards - nothing
+ * here does it, because a program that only wants to run `dir` should not have
+ * its window torn down to do it. */
+static inline int koi_run(const char* command) {
+    return (int)koi_call(SYS_RUN, (long)command, 0, 0);
+}
+
+/* ---- Running something else ----------------------------------------------
+ *
+ * A program cannot call another program: one runs at a time, at a fixed
+ * address. It asks for one to be run after it has exited, when its own memory
+ * is free. Requests run most-recent-first, so "run this and bring me back" is
+ * two calls:
+ *
+ *     koi_chain("MIZU Z:\\GAMES");   asked for first, runs second
+ *     koi_chain("DOOM");             asked for last, runs first
+ *     koi_exit(0);
+ *
+ * The argument is a command line, so the search path, drive letters and
+ * arguments behave as if typed. Coming back is a fresh start, not a resume:
+ * save anything worth keeping before calling this. */
+static inline int koi_chain(const char* command) {
+    return (int)koi_call(SYS_CHAIN, (long)command, 0, 0);
+}
+
+/* ---- The log -------------------------------------------------------------
+ *
+ * The kernel's log, not a log of its own. Two logs of one run have to be
+ * interleaved afterwards by somebody guessing at the order, and knowing the
+ * order is the whole value of a log.
+ *
+ * koi_log_bytes is the important one: everything else a program can report is
+ * what it believed, and this is what is actually there. Use it whenever a
+ * check fails - the dump taken at the moment of failure is the one nobody can
+ * take afterwards. */
+static inline void koi_log(const char* text) {
+    (void)koi_call(SYS_LOG, (long)text, 0, 0);
+}
+
+static inline void koi_log_bytes(const char* label, const void* data,
+                                 long length) {
+    (void)koi_call(SYS_LOG_BYTES, (long)label, (long)data, length);
+}
+
+/* One sector, straight off a disk. Read-only, and it grants nothing a program
+   did not already have - programs run in ring 0 - it makes looking at the
+   bytes a deliberate act rather than an accident. `buffer` must hold
+   koi_sector_size(disk) bytes. Returns that size, or -1. */
+static inline long koi_sector_read(long disk, koi_uint64 lba, void* buffer) {
+    return koi_call(SYS_SECTOR_READ, disk, (long)lba, (long)buffer);
+}
+
+static inline long koi_sector_size(long disk) {
+    return koi_call(SYS_SECTOR_SIZE, disk, 0, 0);
+}
+
+/* ---- The clipboard -------------------------------------------------------
+ *
+ * One buffer, in the kernel, outliving the program that filled it - which is
+ * the only arrangement that can carry anything between two programs, and
+ * therefore the only arrangement anybody wants. Text only.
+ *
+ * koi_clip_get with a null buffer returns the length without copying, so a
+ * caller can find out how much room to make before making it. */
+static inline long koi_clip_put(const char* text, long length) {
+    return koi_call(SYS_CLIP_PUT, (long)text, length, 0);
+}
+
+static inline long koi_clip_get(char* buffer, long size) {
+    return koi_call(SYS_CLIP_GET, (long)buffer, size, 0);
+}
+
+/* ---- The pointer ---------------------------------------------------------
+ *
+ * One snapshot, filled in one go. Returns 1 when there is a pointer, 0 when the
+ * machine has none - and fills the structure in either case, so a program that
+ * ignores the answer reads a still cursor rather than rubbish.
+ *
+ *     KOI_POINTER pointer;
+ *     int last_scroll = 0;
+ *     while (running) {
+ *         koi_mouse(&pointer);
+ *         int wheel = pointer.scroll - last_scroll;
+ *         last_scroll = pointer.scroll;
+ *         if (wheel) scroll_the_list_by(wheel);
+ *     }
+ *
+ * `scroll` is a running total, positive upwards, so subtract what you last saw.
+ * On a laptop it is two fingers on the touchpad: the pad turns the gesture into
+ * wheel notches itself, and nothing here has to know it was fingers. */
+static inline int koi_mouse(KOI_POINTER* pointer) {
+    return (int)koi_call(SYS_MOUSE, (long)pointer, 0, 0);
+}
+
+/* Put the pointer somewhere - what to do on entering graphics mode, so that it
+   starts in the middle rather than wherever the last program left it. */
+static inline int koi_mouse_place(int x, int y) {
+    return (int)koi_call(SYS_MOUSE_PLACE, KOI_POINT(x, y), 0, 0);
+}
+
 /* ---- Sound ---------------------------------------------------------------
  *
  * There is nothing to open. One stream of 48 kHz stereo is always running and
@@ -388,6 +592,21 @@ static inline int koi_sound_active(int voice) {
 }
 
 /* 0 to 255, applied to everything. Pass -1 to ask without changing it. */
+/* Where a sound has got to, how long it is, and how to move the first - all in
+   source frames, so frames / rate is seconds. A progress bar needs exactly
+   these three. */
+static inline unsigned int koi_sound_where(int voice) {
+    return (unsigned int)koi_call(SYS_SOUND_WHERE, voice, 0, 0);
+}
+
+static inline unsigned int koi_sound_length(int voice) {
+    return (unsigned int)koi_call(SYS_SOUND_LENGTH, voice, 0, 0);
+}
+
+static inline int koi_sound_seek(int voice, unsigned int frame) {
+    return (int)koi_call(SYS_SOUND_SEEK, voice, (long)frame, 0);
+}
+
 static inline int koi_sound_volume(int volume) {
     return (int)koi_call(SYS_SOUND_VOLUME, (long)volume, 0, 0);
 }

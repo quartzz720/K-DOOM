@@ -56,6 +56,45 @@ int access(const char* path, int mode) {
     return koi_exists(path) == 1 ? 0 : -1;
 }
 
+/* Where a data file is, given its bare name.
+ *
+ * Two places, in this order: where the person is standing, and where the
+ * program lives. The first is DOS's answer and the one somebody expects when
+ * they have cd'd to a directory full of WADs. The second is what makes the
+ * package work at all once \DOOM is on the search path - typing `doom` from
+ * anywhere used to start the game and then fail to find its own data, because
+ * a bare name is resolved against the current directory and the current
+ * directory was not \DOOM.
+ *
+ * Returns the name unchanged when it is in the current directory or nowhere -
+ * so the caller's own "not found" message is still the one printed - and
+ * otherwise a path in static storage.
+ *
+ * The storage rotates, and that is not a nicety. The caller identifies every
+ * WAD it might use in one run of seven calls and keeps all seven pointers; a
+ * single buffer leaves every one of them aimed at whatever was asked for last.
+ * Written that way first, it found the WAD, stored the path, and then had that
+ * path overwritten by the three lookups after it - so the game reported no
+ * files found while holding a pointer to a name that does not exist. Eight
+ * slots is one more than anybody asks for; past that the oldest is reused,
+ * which is a real limit and is written down rather than assumed away. */
+#define FOUND_SLOTS 8
+
+char* k_find_data(const char* name) {
+    static char paths[FOUND_SLOTS][160];
+    static int next;
+    char* path;
+
+    if (koi_exists(name) == 1) return (char*)name;
+
+    path = paths[next];
+    if (koi_beside(name, path, sizeof(paths[0])) && koi_exists(path) == 1) {
+        next = (next + 1) % FOUND_SLOTS;
+        return path;
+    }
+    return (char*)name;
+}
+
 /* Only the size, which is all anything asks for. */
 int fstat(int handle, struct stat* out) {
     long size;

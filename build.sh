@@ -51,19 +51,38 @@ QUIET="-Wno-implicit-function-declaration -Wno-implicit-int
        -Wno-builtin-declaration-mismatch -Wno-discarded-qualifiers
        -Wno-return-type -Wno-int-conversion -Wno-incompatible-pointer-types"
 
-# -mgeneral-regs-only forbids SSE, because nothing configures SSE state after
-# ExitBootServices. That is why FixedDiv2 uses the integer path id left in it.
+# The flags come from the SDK rather than from here.
+#
+# They used to be written out above, copied from koicc on the day this was
+# written, and they went stale in the way copies do: the SDK moved to
+# position-independent executables and this did not, so DOOM.EXE came out at a
+# fixed address and the loader refused it - correctly, and without this file
+# having changed at all. One place to state them, and it is the place the
+# system itself builds from.
+#
+# Only the link script's path is rewritten: koiflags names it relative to the
+# directory koicc runs in, and this builds one level above that.
+#
+# -mgeneral-regs-only in there forbids SSE, because nothing configures SSE
+# state after ExitBootServices. That is why FixedDiv2 uses the integer path id
+# left in it.
+if [ ! -f sdk/koiflags ]; then
+    echo "build.sh: sdk/koiflags is missing - refresh sdk/ from a Koi-DOS" >&2
+    echo "tree with: cp ../Koi-DOS/sdk/* sdk/" >&2
+    exit 1
+fi
+. sdk/koiflags
+KOI_LDFLAGS=${KOI_LDFLAGS/-Wl,-T,program.ld/-Wl,-T,sdk/program.ld}
+
+# The game's own flags come after the SDK's, so they win where the two
+# disagree: gnu99 over c11, and the warnings above turned back off.
 $CC \
-    -ffreestanding -fno-stack-protector -fno-stack-check -fno-builtin \
-    -fno-pie -mno-red-zone -mgeneral-regs-only \
-    -fno-asynchronous-unwind-tables \
-    -ffunction-sections -fdata-sections \
+    $KOI_CFLAGS \
     -std=gnu99 -O2 \
     -DNORMALUNIX -Dalloca=__builtin_alloca \
     $QUIET \
     $INCLUDES \
-    -nostdlib -no-pie -Wl,-T,sdk/program.ld -Wl,--build-id=none \
-    -Wl,-z,max-page-size=0x1000 -Wl,-z,noexecstack -Wl,--gc-sections \
+    $KOI_LDFLAGS \
     -o DOOM.EXE "${SOURCES[@]}"
 
 ABI=$(sed -n 's/^#define KOI_ABI_VERSION \([0-9]*\).*/\1/p' sdk/syscall.h)

@@ -5,6 +5,11 @@
    reader uses open/lseek/read directly, which is why seeking had to exist
    before any of this could work. */
 #include "koi.h"
+
+/* Where a data file is, given its bare name: the current directory first, then
+   beside the program. Not a unix call - it lives here because this is the
+   header every file that opens a data file already includes. */
+char* k_find_data(const char* name);
 #include "stdlib.h"
 
 #define SEEK_SET KOI_SEEK_SET

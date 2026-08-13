@@ -29,8 +29,13 @@
 #define SYSCALL_VECTOR 0x40
 
 /* Major in the high byte, minor in the low one. Reported by SYS_VERSION and
-   printed by `ver`. */
-#define KOI_DOS_VERSION 0x0005
+   printed by `ver`.
+ *
+ * 0.51 rather than 0.6: the jump from 0.5 is not a jump in what the system is,
+ * it is the point at which it stopped needing a USB stick to be changed. A
+ * machine that updates itself over the network is a different thing to live
+ * with than one that does not, and that is what beta means here. */
+#define KOI_DOS_VERSION 0x0033
 
 /* The interface's own version, which moves independently of the system's.
  *
@@ -53,7 +58,16 @@
  * ONCE THE INTERFACE IS FROZEN, FUNCTION NUMBERS ARE NEVER REUSED. A removed
  * call leaves a hole. This is the promise that makes old programs safe, and it
  * costs nothing to keep - there are 256 numbers and twenty are in use. */
-#define KOI_ABI_VERSION 8
+/* 9 adds the pointer (SYS_MOUSE, SYS_MOUSE_PLACE) and takes nothing away.
+ *
+ * The minimum stays at 8 for the first time, which is a decision rather than an
+ * oversight. The rule above exists because a REUSED function number does the
+ * wrong thing silently; 9 reuses none - it only fills two of the holes. And the
+ * cost of moving the minimum is now real: a system update ships the kernel and
+ * nothing else, so raising it would refuse every program already installed on a
+ * machine until each was reinstalled. A rule worth keeping is worth keeping for
+ * its reason, and the reason does not apply here. */
+#define KOI_ABI_VERSION 14
 #define KOI_ABI_MINIMUM 8
 #define KOI_ABI_IS_ALPHA 1
 
@@ -66,6 +80,16 @@ typedef struct {
     unsigned int abi_version;
     unsigned int reserved[2];
 } KOI_PROGRAM_HEADER;
+
+/* The exit code of a program that was stopped with Ctrl+C rather than one that
+ * finished. 130 is what the unix world uses for it - 128 plus the signal
+ * number - and borrowing a number somebody else has already agreed on beats
+ * inventing one that only means something here.
+ *
+ * A program never returns this itself; the kernel supplies it. A batch file
+ * can therefore tell "the command failed" from "somebody stopped it", which
+ * are different things to carry on from. */
+#define KOI_EXIT_INTERRUPTED 130
 
 /* Console and process. */
 #define SYS_EXIT 0x00        /* (code) - does not return */
@@ -97,6 +121,16 @@ typedef struct {
  * has happened. Reading these does not consume characters, so a program may
  * use both. */
 #define SYS_KEYEVENT 0x0A    /* () -> key, or key | KOI_KEY_RELEASED, or 0 */
+/* Put the cursor somewhere, and show or hide it.
+ *
+ * What separates a program that prints from a program that has a screen. An
+ * editor without this has to clear and reprint everything to move one
+ * character - thousands of calls per keystroke, and a visible flicker on every
+ * one of them. DOS programs reached for the BIOS or ANSI codes; this is the
+ * same thing without the detour. Columns and rows, not pixels: the sizes are
+ * KOI_INFO_TEXT_COLUMNS and KOI_INFO_TEXT_ROWS. */
+#define SYS_GOTOXY 0x0B      /* (point: column, row) -> 0 */
+#define SYS_CURSOR 0x0C      /* (visible) -> 0 */
 
 /* Keys with no ASCII value, returned by SYS_GETCHAR above 0xFF so a caller can
    switch on them alongside ordinary characters.
@@ -174,6 +208,20 @@ typedef struct {
    is standing. A package manager that cannot create a directory cannot do
    that. */
 #define SYS_MKDIR 0x1C       /* (path) -> 0, or -1 */
+/* Change which drive this program's paths are resolved against.
+ *
+ * A program starts on the drive the shell was standing on and, before this,
+ * could never leave it. Which is fine for a program given a filename and fatal
+ * for a file manager: the only way to reach another drive was to ask the shell
+ * to change drive and restart - and a program that does that is asking to be
+ * restarted from a drive it is no longer on. Mizu did exactly that, changed to
+ * the USB stick, and could not find itself.
+ *
+ * Affects this program only. The shell stays where it was, and the next program
+ * to run starts where the user is standing, so a program cannot move the user's
+ * feet by exiting. The working directory returns to the root, because the one
+ * it was in belonged to a different drive. */
+#define SYS_SETDRIVE 0x1D    /* (drive letter) -> 1, or -1 when there is none */
 
 /* Directory enumeration. Without these a program cannot write its own `dir`,
    which makes the shell's built-in the only way to see a directory. */
@@ -254,11 +302,32 @@ typedef struct {
 #define KOI_INFO_DISK_SECTOR_SIZE 19
 #define KOI_INFO_VOLUME_LETTER 20    /* the drive letter, as a character */
 #define KOI_INFO_VOLUME_IS_BOOT 21
+/* Which volume the program's own paths are resolved against - the drive the
+   shell was standing on. A program can enumerate the drives and could not,
+   before this, tell which one it was on. */
+#define KOI_INFO_VOLUME_IS_CURRENT 24
 /* Whether there is anything to play sound through. A program that makes noise
    has to be able to ask, because every sound call succeeding into silence and
    every one failing look identical from the inside. */
 #define KOI_INFO_AUDIO 22
 #define KOI_INFO_AUDIO_RATE 23
+/* The wall clock, packed so that one call is one moment.
+ *
+ * Not an hour call and a minute call. The clock moves between them, and a
+ * program that reads 10:59 and then 00 has produced a time that never
+ * happened - which is a bug that appears once an hour and is never
+ * reproducible. The same reason SYS_MOUSE fills in one structure. */
+#define KOI_INFO_TIME 25             /* hour << 16 | minute << 8 | second */
+#define KOI_INFO_DATE 26             /* year << 16 | month << 8 | day */
+#define KOI_INFO_VOLUME_TOTAL_BYTES 27 /* index selects the volume, KiB */
+#define KOI_INFO_VOLUME_FREE_BYTES 28  /* index selects the volume, KiB */
+
+#define KOI_TIME_HOUR(packed) ((int)(((packed) >> 16) & 0xFF))
+#define KOI_TIME_MINUTE(packed) ((int)(((packed) >> 8) & 0xFF))
+#define KOI_TIME_SECOND(packed) ((int)((packed) & 0xFF))
+#define KOI_DATE_YEAR(packed) ((int)(((packed) >> 16) & 0xFFFF))
+#define KOI_DATE_MONTH(packed) ((int)(((packed) >> 8) & 0xFF))
+#define KOI_DATE_DAY(packed) ((int)((packed) & 0xFF))
 
 /* Text items, written into the caller's buffer and always terminated. */
 #define KOI_TEXT_BUILD_DATE 0
@@ -266,6 +335,16 @@ typedef struct {
 #define KOI_TEXT_DISK_NAME 2         /* index selects the disk */
 #define KOI_TEXT_VOLUME_LABEL 3      /* index selects the volume */
 #define KOI_TEXT_AUDIO_DEVICE 4      /* the codec, or "none" */
+#define KOI_TEXT_CPU_NAME 5          /* the processor brand string */
+/* The path this program was loaded from, from the root of its drive.
+ *
+ * A program cannot work this out for itself: SYS_ARGS gives it the tail of the
+ * command line and not the name it was invoked by. Which is fine until a
+ * program has to ask for itself to be run again - a shell that chains a program
+ * and wants to come back afterwards - and then guessing its own location is the
+ * difference between working and working only when installed where the guess
+ * happened to be right. */
+#define KOI_TEXT_PROGRAM_PATH 6
 
 /* Graphics.
  *
@@ -298,6 +377,16 @@ typedef struct {
  * so a caller that knows what it changed need not also know where the edges
  * are. */
 #define SYS_GFX_PRESENT_RECT 0x3A  /* (point, size) */
+/* (point, text, colour, background | style << 32). Bold, italic and underline
+   are made from the glyph the font already has - see graphics.c - so they cost
+   no extra font data and work with whatever font is fitted later. */
+#define SYS_GFX_TEXT_STYLED 0x3B   /* (point, text, colour, packed) */
+#define SYS_GFX_SCISSOR 0x3C       /* (point, size) - intersect clip rect */
+#define SYS_GFX_SCISSOR_RESET 0x3D /* () - restore full-screen clipping */
+
+#define KOI_TEXT_BOLD 1
+#define KOI_TEXT_ITALIC 2
+#define KOI_TEXT_UNDERLINE 4
 
 /* ---- Sound ---------------------------------------------------------------
  *
@@ -322,6 +411,10 @@ typedef struct {
    calls this every tic for every sound whose direction or distance from the
    player has changed, and without it a rocket that flies past stays where it
    was fired. Pass -1 for either to leave it alone. */
+#define SYS_SOUND_WHERE 0x46  /* (voice) -> frames played */
+#define SYS_SOUND_LENGTH 0x47 /* (voice) -> frames in the sound */
+#define SYS_SOUND_SEEK 0x48   /* (voice, frame) -> 0, or -1 */
+
 #define SYS_SOUND_PARAMS 0x45  /* (voice, volume, pan) -> 0, or -1 */
 
 #define KOI_SOUND_U8 8         /* unsigned bytes, 0x80 is silence */
@@ -340,6 +433,148 @@ typedef struct {
     unsigned int loop;         /* non-zero to repeat until stopped */
     unsigned int reserved;
 } KOI_SOUND;
+
+/* ---- The pointer ---------------------------------------------------------
+ *
+ * One call, filling in a snapshot. Not four calls returning a coordinate each:
+ * the pointer moves between them, and a program that reads x and then y can get
+ * a position the pointer was never at. One structure, filled in one go, is a
+ * place the pointer actually was.
+ *
+ * `scroll` is a running total rather than what has arrived since the last ask.
+ * Taking would mean the first caller to look gets the notches and everyone else
+ * sees a still wheel; a total can be read by any number of callers, each
+ * remembering what it last saw and subtracting.
+ */
+#define SYS_MOUSE 0x50       /* (KOI_POINTER*) -> 1, 0 when there is none, -1 */
+/* Put the pointer somewhere. What a program does on entering graphics mode, so
+   that the pointer starts in the middle of its window rather than wherever it
+   was left by whatever ran last. */
+#define SYS_MOUSE_PLACE 0x51 /* (point) -> 0, or -1 */
+
+/* ---- Running something else ----------------------------------------------
+ *
+ * One program runs at a time, at a fixed address, in one address space - the
+ * whole of the design, and not going to change. So a program cannot call
+ * another program; it asks for one to be run AFTER it has exited, when its own
+ * memory is free and the new program can load into it.
+ *
+ * Requests run most-recent-first, which turns "run this and then bring me back"
+ * into two ordinary calls:
+ *
+ *     koi_chain("MIZU Z:\\GAMES");   asked for first, runs second
+ *     koi_chain("DOOM");             asked for last, runs first
+ *     koi_exit(0);
+ *
+ * The argument is a command line, not a path: it goes back through the shell,
+ * so the search path, drive letters, arguments and batch files behave exactly
+ * as if it had been typed.
+ *
+ * Coming back is a fresh start and not a resume. Nothing of the program
+ * survives, so anything it wants to remember it hands to itself as arguments or
+ * writes to a file first. Small DOS shells did precisely this, for precisely
+ * this reason. */
+#define SYS_CHAIN 0x52       /* (command) -> 1, or 0 when too many are waiting */
+
+/* ---- The clipboard -------------------------------------------------------
+ *
+ * One buffer, in the kernel, outliving the program that filled it. That is the
+ * whole feature and it is the reason it belongs to the kernel rather than to a
+ * shell: a clipboard that dies with the program cannot carry anything between
+ * two programs, which is the only thing anyone wants a clipboard for.
+ *
+ * Windows 1.0 shipped one in 1985 and it was one of the three things the box
+ * talked about. It is text only here - there is no second kind of thing this
+ * system can put on it yet, and a type tag with one value is a lie about how
+ * general something is.
+ *
+ * SYS_CLIP_GET into a null buffer returns the length without copying, which is
+ * how a caller finds out how much room to make. */
+#define SYS_CLIP_PUT 0x53    /* (text, length) -> length kept, or -1 */
+#define SYS_CLIP_GET 0x54    /* (buffer, size) -> length, 0 when empty */
+
+#define KOI_CLIP_MAX 65536
+
+/* ---- The log, and the bytes underneath -----------------------------------
+ *
+ * A program writes into the same log the kernel writes into - the one that
+ * goes to COM1, is kept in memory for `log`, and is written to a file at boot.
+ * Not a log of its own: two logs of the same run have to be interleaved by
+ * hand afterwards, by somebody guessing at the order, and the whole value of a
+ * log is that it already knows the order.
+ *
+ * SYS_LOG_BYTES is the one that matters. Everything a program can say about
+ * itself is what it believed; this is what is actually there. Diagnosing the
+ * lost-files bug meant carrying the disk to another machine and taking it
+ * apart there, because nothing on the machine that failed could show a sector.
+ *
+ * SYS_SECTOR_READ is read-only and cannot damage anything. It grants no power
+ * a program did not have - programs run in ring 0 and can already touch any
+ * memory in the machine - it makes an existing capability usable on purpose
+ * rather than by accident. There is deliberately no write counterpart. */
+#define SYS_LOG 0x55         /* (text) -> 0 */
+#define SYS_LOG_BYTES 0x56   /* (label, data, length) -> 0 */
+#define SYS_SECTOR_READ 0x57 /* (disk, lba, buffer) -> bytes read, or -1 */
+/* How many disks, and how large a sector is on one of them - which a caller
+   needs before it can offer a buffer. */
+#define SYS_SECTOR_SIZE 0x58 /* (disk) -> bytes per sector, or -1 */
+
+/* Run a command and come back when it has finished.
+ *
+ * The caller stays in memory with everything it had; the program it starts is
+ * loaded into a slot of its own and this returns when that program exits. It
+ * is what DOS's EXEC did and what SYS_CHAIN was standing in for while the
+ * machine could hold one image at a time.
+ *
+ * SYS_CHAIN is still here and still means something different: chaining gives
+ * up this program's memory before the next one starts, which is the only way
+ * to run something that needs more of the window than is left. Running keeps
+ * it. A shell that wants to come back where it was wants this one.
+ *
+ * The screen belongs to whoever took it. A program holding the framebuffer
+ * should give it back before calling this and take it again afterwards -
+ * nothing here does that for it, because a program that only wants to run
+ * `dir` should not have its window torn down. */
+#define SYS_RUN 0x59         /* (command) -> the program's exit code, or -1 */
+
+/* The environment, as the shell has it.
+ *
+ * Read-only from a program, and that is a decision rather than an omission.
+ * There is one environment because there is one program running at a time; a
+ * program that could write it would be changing the shell's, and the change
+ * would outlive the program that made it. DOS gave each program a copy for
+ * exactly that reason, and copies are what this will get when programs are
+ * isolated - at which point a setter can be added and will mean something.
+ *
+ * SYS_GETENV fills `buffer` with the value and returns its length, or 0 when
+ * there is no such variable. SYS_ENVAT is how a program lists them: it takes
+ * an index from zero and fills `name`, returning 0 when the index is past the
+ * end. */
+#define SYS_GETENV 0x5A      /* (name, buffer, size) -> length, or 0 */
+#define SYS_ENVAT 0x5B       /* (index, name, size) -> length, or 0 */
+
+#define KOI_BUTTON_LEFT 0x01
+#define KOI_BUTTON_RIGHT 0x02
+#define KOI_BUTTON_MIDDLE 0x04
+#define KOI_BUTTON_SIDE_4 0x10
+#define KOI_BUTTON_SIDE_5 0x20
+
+typedef struct {
+    int x;
+    int y;
+    unsigned int buttons;      /* KOI_BUTTON_*, as they are right now */
+    int scroll;                /* notches since boot, positive upwards */
+    unsigned int movements;    /* packets that have moved it, ever */
+    unsigned int has_wheel;    /* also: whether two-finger scrolling works */
+    /* How many times each has gone down, ever: left, right, middle.
+     *
+     * Use these for clicks, not `buttons`. A click lasts a tenth of a second
+     * at most, and a program that looks thirty times a second will sooner or
+     * later look between the press and the release and see nothing - which
+     * presents as a button that sometimes does not work rather than as a
+     * missed sample. A count cannot be missed. */
+    unsigned int presses[3];
+} KOI_POINTER;
 
 /* Two coordinates in one argument.
  *

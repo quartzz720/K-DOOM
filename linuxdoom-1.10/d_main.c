@@ -583,13 +583,18 @@ void IdentifyVersion (void)
     // The separator is the other reason this block had to change. DOOM builds
     // "%s/doom.wad", and a forward slash is not a path separator here - it
     // introduces a switch, as it did in DOS.
-    doom2wad = "doom2.wad";
-    doomuwad = "doomu.wad";
-    doomwad = "doom.wad";
-    doom1wad = "doom1.wad";
-    plutoniawad = "plutonia.wad";
-    tntwad = "tnt.wad";
-    doom2fwad = "doom2f.wad";
+    // Each name is looked for where the person is standing, and then beside
+    // the program. The second is what makes `doom` work once \DOOM is on the
+    // search path: before it, typing the name from anywhere started the game
+    // and then failed to find its own WAD, because a bare name resolves
+    // against the current directory and that was not \DOOM.
+    doom2wad = k_find_data("doom2.wad");
+    doomuwad = k_find_data("doomu.wad");
+    doomwad = k_find_data("doom.wad");
+    doom1wad = k_find_data("doom1.wad");
+    plutoniawad = k_find_data("plutonia.wad");
+    tntwad = k_find_data("tnt.wad");
+    doom2fwad = k_find_data("doom2f.wad");
 
     strcpy (basedefault, "default.cfg");
 #endif
